@@ -1,0 +1,4 @@
+aiortc>=1.9
+websockets>=12
+requests>=2.31
+numpy>=1.26

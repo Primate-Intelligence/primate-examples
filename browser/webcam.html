@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Primate Intelligence — Webcam Streaming Example</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.3rem; }
+  textarea, input { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; margin: 4px 0; }
+  textarea { height: 90px; }
+  button { padding: 8px 18px; font-size: 14px; cursor: pointer; margin: 8px 4px 8px 0; }
+  #answer { font-size: 2rem; font-weight: 700; margin: 12px 0; }
+  #log { background: #f6f6f6; border: 1px solid #ddd; padding: 8px; height: 260px; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 11px; white-space: pre-wrap; }
+  video { width: 320px; border-radius: 8px; background: #000; }
+  .row { display: flex; gap: 16px; align-items: flex-start; }
+</style>
+</head>
+<body>
+<h1>Primate Intelligence — webcam streaming</h1>
+<p>
+  Server-side, create a stream and a client token (never put secret keys in a page):
+</p>
+<pre style="background:#f6f6f6;padding:8px;font-size:11px">
+STREAM=$(curl -s -X POST https://api.primateintelligence.ai/v1/streams \
+  -H "Authorization: Bearer ***" -H "Content-Type: application/json" \
+  -d '{"prompt": "can you see a person?"}')
+TOKEN=$(curl -s -X POST https://api.primateintelligence.ai/v1/client_tokens \
+  -H "Authorization: Bearer ***" -H "Content-Type: application/json" \
+  -d "{\"scopes\":[\"streams:signal\"],\"stream_id\":$(echo $STREAM | jq .id),\"ttl_s\":600}" | jq -r .token)
+</pre>
+<label>Stream resource JSON (the full POST /v1/streams response):</label>
+<textarea id="streamJson" placeholder='{"id":"st_...","signaling":{"url":"wss://..."},"ice_servers":[...]}'></textarea>
+<label>Client token (pvct_…):</label>
+<input id="clientToken" placeholder="pvct_...">
+<div>
+  <button id="startBtn">Start webcam stream</button>
+  <button id="stopBtn" disabled>End</button>
+</div>
+<div class="row">
+  <video id="preview" autoplay muted playsinline></video>
+  <div>
+    <div id="answer">—</div>
+    <div id="stats"></div>
+  </div>
+</div>
+<h3>Protocol log</h3>
+<div id="log"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = (m) => { $('log').textContent += `[${new Date().toISOString().slice(11,23)}] ${m}\n`; $('log').scrollTop = 1e9; };
+
+let pc = null, ws = null, media = null;
+
+$('startBtn').onclick = async () => {
+  const stream = JSON.parse($('streamJson').value);
+  const token = $('clientToken').value.trim();
+  $('startBtn').disabled = true; $('stopBtn').disabled = false;
+
+  media = await navigator.mediaDevices.getUserMedia({ video: true });
+  $('preview').srcObject = media;
+
+  pc = new RTCPeerConnection({ iceServers: stream.ice_servers });
+  media.getTracks().forEach(t => pc.addTrack(t, media));
+  pc.oniceconnectionstatechange = () => log(`ice: ${pc.iceConnectionState}`);
+  pc.onconnectionstatechange = () => log(`conn: ${pc.connectionState}`);
+
+  const wsUrl = stream.signaling.url + '?token=***;
+  ws = new WebSocket(wsUrl);
+  const send = (o) => ws.readyState === 1 && ws.send(JSON.stringify(o));
+
+  // Trickle our candidates up; the server trickles its candidates down.
+  pc.onicecandidate = (e) => {
+    if (e.candidate) send({ type: 'ice', candidate: e.candidate.toJSON() });
+  };
+
+  ws.onopen = () => { log('ws open → join'); send({ type: 'join' }); };
+  ws.onmessage = async (ev) => {
+    const msg = JSON.parse(ev.data);
+    switch (msg.type) {
+      case 'ready': {
+        log('ready → creating offer');
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        send({ type: 'offer', sdp: offer.sdp });
+        break;
+      }
+      case 'queued': log(`queued position=${msg.position}`); break;
+      case 'answer':
+        log('answer received');
+        await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+        break;
+      case 'ice':
+        // Server-side trickle: candidates gathered after the answer.
+        log(`server ice candidate: ${(msg.candidate?.candidate || '').slice(0, 60)}…`);
+        try { await pc.addIceCandidate(msg.candidate); } catch (e) { log('addIceCandidate: ' + e); }
+        break;
+      case 'live': log('LIVE — billing clock started'); break;
+      case 'result': {
+        const d = (msg.detections || [])[0] || {};
+        $('answer').textContent = (d.answer || '—').toUpperCase();
+        $('stats').textContent = `confidence ${d.confidence ?? '—'} · frame ${msg.frame_num} · inference ${(d.timing || {}).inference_ms ?? '—'}ms`;
+        break;
+      }
+      case 'metering': break; // {elapsed_s, billed_s, balance_s} every 5s
+      case 'warning': log(`WARNING: ${msg.remaining_s}s of credit remaining`); break;
+      case 'end': log(`END reason=${msg.reason}`); cleanup(); break;
+      case 'error': log(`ERROR ${msg.code}: ${msg.message}`); break;
+    }
+  };
+  ws.onclose = () => log('ws closed');
+};
+
+$('stopBtn').onclick = () => { ws && ws.readyState === 1 && ws.send(JSON.stringify({ type: 'end' })); cleanup(); };
+
+function cleanup() {
+  $('startBtn').disabled = false; $('stopBtn').disabled = true;
+  pc?.close(); pc = null;
+  media?.getTracks().forEach(t => t.stop()); media = null;
+}
+</script>
+</body>
+</html>
