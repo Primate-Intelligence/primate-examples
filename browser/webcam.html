@@ -102,8 +102,19 @@ $('startBtn').onclick = async () => {
         $('stats').textContent = `confidence ${d.confidence ?? '—'} · frame ${msg.frame_num} · inference ${(d.timing || {}).inference_ms ?? '—'}ms`;
         break;
       }
-      case 'metering': break; // {elapsed_s, billed_s, balance_s} every 5s
-      case 'warning': log(`WARNING: ${msg.remaining_s}s of credit remaining`); break;
+      // {elapsed_s, billed_s, session_remaining_s} every 5s.
+      // (balance_s is a deprecated alias of session_remaining_s — removed ~2026-08-28.)
+      case 'metering': break;
+      case 'warning':
+        if (msg.code === 'no_media_frames') {
+          // Transport connected but no decodable video within 5s (re-warned at 15s).
+          // packets_received === 0 → client is not sending media (track not attached / muted).
+          // packets_received > 0 with frames_decoded === 0 → media arrives but is not decodable (must be VP8/H.264).
+          log(`WARNING no_media_frames: packets=${msg.packets_received} decoded=${msg.frames_decoded} — ${msg.hint || 'check your capture source'}`);
+        } else {
+          log(`WARNING: ${msg.remaining_s}s of credit remaining`);
+        }
+        break;
       case 'end': log(`END reason=${msg.reason}`); cleanup(); break;
       case 'error': log(`ERROR ${msg.code}: ${msg.message}`); break;
     }

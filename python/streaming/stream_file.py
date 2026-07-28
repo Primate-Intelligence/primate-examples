@@ -304,6 +304,11 @@ async def run(args) -> int:
     audit["ws_end"] = end_info
     audit["ice_states"] = states
     audit["result_frames"] = len(results)
+    # Server-side count of result EVENTS emitted (sampled — not per-source-frame).
+    # Canonical field is results_summary.result_frames; the `frames` alias is
+    # deprecated and removed ~2026-08-28.
+    rs = final.get("results_summary") if isinstance(final.get("results_summary"), dict) else {}
+    audit["server_result_frames"] = rs.get("result_frames")
     audit["sample_results"] = results[:3] + results[-2:] if results else []
     audit["server_trickled_candidates"] = server_trickle
 
