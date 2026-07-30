@@ -1,6 +1,8 @@
 # Primate Intelligence — Examples
 
-Working, runnable examples for the [Primate Intelligence Public API](https://api.primateintelligence.ai/llms.txt).
+Working, runnable examples for the **Primate Vision video analysis API** — a video understanding API by [Primate Intelligence](https://primateintelligence.ai): streaming (WebRTC), file analysis, and browser webcam.
+
+Agent-readable API index: [llms.txt](https://primateintelligence.ai/llms.txt) · Free test key in one call: `curl -X POST https://api.primateintelligence.ai/v1/sandbox` (no signup).
 
 - **Docs (agent guide):** https://api.primateintelligence.ai/docs/agents.md
 - **OpenAPI spec:** https://api.primateintelligence.ai/v1/openapi.json
